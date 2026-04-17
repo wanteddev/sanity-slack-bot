@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.env
+.env.local
+
+# Playwright
+e2e/test-results/
+e2e/.auth/
+playwright-report/
+blob-report/
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+.claude
+_bmad/
+_bmad-output/
+docs

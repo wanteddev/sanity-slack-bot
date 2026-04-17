@@ -1,0 +1,24 @@
+{
+  "name": "sanity-slack-bot",
+  "version": "1.0.0",
+  "description": "Slack 봇 기반 새니티 테스트 자동화 서비스",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc",
+    "test": "playwright test --config=playwright.sanity.config.ts",
+    "test:headed": "playwright test --config=playwright.sanity.config.ts --headed",
+    "test:codegen": "playwright codegen"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.1.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

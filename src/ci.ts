@@ -12,9 +12,15 @@
  * - SLACK_BOT_TOKEN       Slack 봇 토큰 (봇 서버와 같은 앱을 쓰면 재실행 버튼도 동작)
  * - SLACK_REPORT_CHANNEL  결과를 게시할 채널 ID
  * - SLACK_FAILURE_MENTION (선택) 실패 시 함께 멘션할 대상
- * - SANITY_DRY_RUN=1      Slack 게시 없이 실행/출력만 (검증용)
+ * - SANITY_DRY_RUN=1      Slack 게시/시트 기록 없이 실행/출력만 (검증용)
  *
- * 종료 코드: 실패 테스트가 있으면 1 (deploy-end 이후 잡이므로 배포에는 영향 없음)
+ * QA TC 스프레드시트 기록 (셋 다 설정된 경우에만 동작 — sheets-report.ts 참고):
+ * - SANITY_GSHEET_CREDENTIALS  Google 서비스 계정 키 (JSON 원본 또는 base64)
+ * - SANITY_SHEET_ID            스프레드시트 ID
+ * - SANITY_SHEET_TEMPLATE_GID  TC양식 탭 gid (기본: 738930801)
+ *
+ * 종료 코드: 실패 테스트가 있으면 1 (deploy-end 이후 잡이므로 배포에는 영향 없음).
+ * 시트 기록 실패는 경고로만 남기고 종료 코드에 영향을 주지 않는다.
  */
 import { WebClient } from '@slack/web-api';
 import {
@@ -27,6 +33,7 @@ import {
 import { runTests, type TestResult } from './test-runner';
 import { buildResultMessage } from './slack-ui';
 import { postScenarioResults } from './slack-report';
+import { reportToSheet } from './sheets-report';
 
 interface BrowserOutcome {
   browser: Browser;
@@ -142,6 +149,35 @@ async function main() {
     }
   }
 
+  // QA TC 스프레드시트 기록 — 실패해도 경고만 남김 (테스트 결과와 무관)
+  let sheetLine: string | null = null;
+  const gsheetCredentials = process.env.SANITY_GSHEET_CREDENTIALS;
+  const sheetId = process.env.SANITY_SHEET_ID;
+  if (gsheetCredentials && sheetId && !dryRun) {
+    try {
+      const kstDate = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+      const report = await reportToSheet({
+        credentialsRaw: gsheetCredentials,
+        spreadsheetId: sheetId,
+        templateGid: Number(process.env.SANITY_SHEET_TEMPLATE_GID || '738930801'),
+        date: kstDate,
+        outcomes,
+      });
+      sheetLine = `📋 TC 시트 \`${report.tabName}\` ${report.created ? '생성' : '갱신'} — 셀 ${report.updatedCells}개 기록`;
+      console.log(`[ci] 시트 기록 완료: ${report.tabName} (${report.updatedCells}개 셀)`);
+      if (report.unmatchedRows.length > 0) {
+        console.warn('[ci] 시트에서 찾지 못한 TC 행 (양식 텍스트 변경 여부 확인 필요):');
+        for (const row of report.unmatchedRows) console.warn(`  - ${row}`);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      sheetLine = `⚠️ TC 시트 기록 실패: ${message.slice(0, 200)}`;
+      console.error('[ci] 시트 기록 실패:', message);
+    }
+  } else if (dryRun && gsheetCredentials && sheetId) {
+    console.log('[dry-run] 시트 기록 건너뜀');
+  }
+
   // 종합 요약으로 헤더 갱신
   const totalFailed = outcomes.reduce((acc, o) => acc + (o.result?.failed ?? 1), 0);
   const allGreen = totalFailed === 0;
@@ -149,7 +185,7 @@ async function main() {
     !allGreen && SLACK_CONFIG.failureMention ? ` — ${SLACK_CONFIG.failureMention}` : '';
   const summary = headerText(
     allGreen ? '✅' : '❌',
-    ['───────────────', ...outcomes.map(outcomeLine)],
+    ['───────────────', ...outcomes.map(outcomeLine), ...(sheetLine ? [sheetLine] : [])],
   ) + mention;
 
   if (!dryRun && headerTs) {

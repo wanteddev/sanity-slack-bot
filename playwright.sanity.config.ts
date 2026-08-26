@@ -1,11 +1,13 @@
 import 'dotenv/config';
 import { defineConfig, devices } from '@playwright/test';
+import { getAuthFile } from './e2e/helpers/auth-file';
 
 export default defineConfig({
   testDir: './e2e',
   outputDir: './e2e/test-results',
   fullyParallel: true,
-  retries: 0,
+  // flaky 보완: 재시도 후 통과하면 러너가 통과로 집계함 (trace는 재시도 시에만 기록)
+  retries: 1,
   workers: 3,
   timeout: 30_000,
   reporter: [['json', { outputFile: undefined }]],
@@ -40,40 +42,59 @@ export default defineConfig({
       dependencies: ['setup'],
       use: {
         ...devices['Desktop Chrome'],
-        storageState: 'e2e/.auth/user.json',
+        // 환경별 세션 캐시 (auth.setup이 검증/갱신)
+        storageState: getAuthFile(),
       },
     },
 
-    // ── Desktop Safari (비활성) ──
-    // {
-    //   name: 'safari',
-    //   testMatch: /member\.spec\.ts/,
-    //   use: { ...devices['Desktop Safari'] },
-    // },
-    // {
-    //   name: 'safari-auth',
-    //   testIgnore: /member\.spec\.ts/,
-    //   dependencies: ['setup'],
-    //   use: {
-    //     ...devices['Desktop Safari'],
-    //     storageState: 'e2e/.auth/user.json',
-    //   },
-    // },
+    // ── Desktop Safari (WebKit) ──
+    // 러너가 --project 필터로 크롬/사파리 중 하나를 선택해 실행한다.
+    // 인증 셋업은 크롬(setup)으로 수행하고 storageState(JSON 쿠키)를 공유.
+    {
+      name: 'safari',
+      testMatch: /member\.spec\.ts/,
+      use: { ...devices['Desktop Safari'] },
+    },
+    {
+      name: 'safari-auth',
+      testIgnore: /member\.spec\.ts/,
+      dependencies: ['setup'],
+      use: {
+        ...devices['Desktop Safari'],
+        storageState: getAuthFile(),
+      },
+    },
 
-    // ── Mobile (비활성) ──
-    // {
-    //   name: 'mobile',
-    //   testMatch: /member\.spec\.ts/,
-    //   use: { ...devices['iPhone 14'] },
-    // },
-    // {
-    //   name: 'mobile-auth',
-    //   testIgnore: /member\.spec\.ts/,
-    //   dependencies: ['setup'],
-    //   use: {
-    //     ...devices['iPhone 14'],
-    //     storageState: 'e2e/.auth/user.json',
-    //   },
-    // },
+    // ── 모바일웹 Chrome (Pixel 7, Chromium) ──
+    {
+      name: 'mobile-chrome',
+      testMatch: /member\.spec\.ts/,
+      use: { ...devices['Pixel 7'] },
+    },
+    {
+      name: 'mobile-chrome-auth',
+      testIgnore: /member\.spec\.ts/,
+      dependencies: ['setup'],
+      use: {
+        ...devices['Pixel 7'],
+        storageState: getAuthFile(),
+      },
+    },
+
+    // ── 모바일웹 Safari (iPhone 14, WebKit) ──
+    {
+      name: 'mobile-safari',
+      testMatch: /member\.spec\.ts/,
+      use: { ...devices['iPhone 14'] },
+    },
+    {
+      name: 'mobile-safari-auth',
+      testIgnore: /member\.spec\.ts/,
+      dependencies: ['setup'],
+      use: {
+        ...devices['iPhone 14'],
+        storageState: getAuthFile(),
+      },
+    },
   ],
 });

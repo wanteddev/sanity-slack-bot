@@ -12,11 +12,11 @@ test.describe('교육/이벤트', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await dismissEventPopup(page);
     await page                                                                                                                                                                                                    
-    .locator('[class*="MenuNav_"] [class*="MenuItem_"][data-attribute-id="gnb"][data-gnb-kind="event"]')                                                                                                      
+    .locator('[data-attribute-id="gnb"][data-gnb-kind="event"]').locator('visible=true').first()                                                                                                      
     .click(); 
     const eventURL = getEventBaseURL();
     await page.waitForLoadState('domcontentloaded');
-    await page.waitForURL(eventURL, { timeout: 30_000 });
+    await page.waitForURL(eventURL, { timeout: 30_000, waitUntil: 'domcontentloaded' });
     
     const cards = page.locator(
       '[data-role="event-home-container"] [wds-component="card-content"]',
@@ -28,11 +28,11 @@ test.describe('교육/이벤트', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await dismissEventPopup(page);
     await page                                                                                                                                                                                                    
-    .locator('[class*="MenuNav_"] [class*="MenuItem_"][data-attribute-id="gnb"][data-gnb-kind="event"]')                                                                                                      
+    .locator('[data-attribute-id="gnb"][data-gnb-kind="event"]').locator('visible=true').first()                                                                                                      
     .click(); 
     const eventURL = getEventBaseURL();
     await page.waitForLoadState('domcontentloaded');
-    await page.waitForURL(eventURL, { timeout: 30_000 });
+    await page.waitForURL(eventURL, { timeout: 30_000, waitUntil: 'domcontentloaded' });
 
     const firstLink = page.locator('[data-role="event-home-container"] a').first();
     await expect(firstLink).toBeVisible({ timeout: 10_000 });

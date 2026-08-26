@@ -8,6 +8,7 @@
     "start": "node dist/server.js",
     "build": "tsc",
     "test": "playwright test --config=playwright.sanity.config.ts",
+    "ci": "tsc && node dist/ci.js",
     "test:headed": "playwright test --config=playwright.sanity.config.ts --headed",
     "test:codegen": "playwright codegen"
   },
@@ -16,7 +17,7 @@
     "dotenv": "^16.4.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.0",
+    "@playwright/test": "1.59.1",
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"

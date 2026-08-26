@@ -5,6 +5,7 @@ dist/
 
 # Playwright
 e2e/test-results/
+e2e/report.json
 e2e/.auth/
 playwright-report/
 blob-report/

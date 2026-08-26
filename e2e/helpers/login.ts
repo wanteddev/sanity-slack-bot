@@ -1,8 +1,16 @@
 import { expect, Page } from '@playwright/test';
 import { dismissAppPopup, dismissEventPopup } from './dismiss-app-popup';
 
-const TEST_USER_EMAIL = 'lsh_test_100@test.com';
-const TEST_USER_PASSWORD = '123qwe!!';
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`환경변수 ${name}이(가) 설정되지 않았습니다. .env 파일을 확인하세요.`);
+  }
+  return value;
+}
+
+const TEST_USER_EMAIL = requireEnv('TEST_USER_EMAIL');
+const TEST_USER_PASSWORD = requireEnv('TEST_USER_PASSWORD');
 
 export async function login(page: Page) {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
@@ -11,8 +19,8 @@ export async function login(page: Page) {
   await page.locator('[data-gnb-kind="signupLogin"]').click();
   await page.waitForLoadState('domcontentloaded');
 
-  // Continue with email 버튼 클릭
-  await page.getByTestId('Button').click();
+  // 이메일 로그인 진입 (OneID 개편으로 testid가 사라져 버튼 텍스트로 매칭, 영/한 locale 모두 대응)
+  await page.getByRole('button', { name: /start with email|이메일로 시작/i }).click();
   await page.waitForLoadState('domcontentloaded');
 
   const emailInput = page.getByTestId('Input_email');

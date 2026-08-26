@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { login } from './helpers/login';
-import { dismissEventPopup } from './helpers/dismiss-app-popup';
+import { dismissEventPopup, isMobileViewport } from './helpers/dismiss-app-popup';
 
 test.describe('회원', () => {
   test('이메일 로그인 정상 동작 확인', async ({ page }) => {
@@ -9,21 +9,47 @@ test.describe('회원', () => {
 
   test('로그아웃 정상 동작 확인', async ({ page }) => {
     await login(page);
-
-    // 프로필 영역 클릭
     await page.waitForLoadState('domcontentloaded');
-    await page.locator('[data-gnb-kind="myWanted"]').click();
 
-    // 로그아웃 클릭
-    await page.waitForLoadState('domcontentloaded');
-    await page.locator('[data-snb-kind="logout"]').click();
+    if (isMobileViewport(page)) {
+      // 모바일: 우측 상단 햄버거(더보기) 메뉴 → 로그아웃 버튼
+      await page
+        .locator('[data-gnb-kind="more"]')
+        .locator('visible=true')
+        .first()
+        .click();
+      await page
+        .getByRole('button', { name: '로그아웃' })
+        .filter({ visible: true })
+        .first()
+        .click();
+    } else {
+      // 데스크톱: MY 원티드(소셜 서비스 my 페이지) → 사이드바 로그아웃
+      await page.locator('[data-gnb-kind="myWanted"]').locator('visible=true').first().click();
+      await page.waitForLoadState('domcontentloaded');
 
-    // 비로그인 상태 확인 - 로그인 버튼 다시 노출
-    await page.waitForURL('/', { timeout: 10_000 });
-    await page.waitForLoadState('domcontentloaded');
-    await dismissEventPopup(page);
+      // 일부 환경(dev)은 소셜 서비스가 Google 인증 게이트(firebase.wanted.co.kr)로 차단됨
+      test.skip(
+        page.url().includes('firebase.wanted.co.kr'),
+        'MY 원티드(소셜 서비스)가 인증 게이트로 차단된 환경 — 로그아웃 플로우 검증 불가',
+      );
+
+      // 로그아웃 클릭 → 로그아웃 API 경유 리다이렉트가 메인으로 돌아올 때까지 대기
+      // (리다이렉트 완료 전에 페이지를 떠나면 로그아웃이 유실됨 — 특히 WebKit에서 재현)
+      await page.locator('[data-snb-kind="logout"]').click();
+      const mainHost = new URL(
+        process.env.E2E_BASE_URL || 'https://dev.wanted.co.kr',
+      ).hostname;
+      await page.waitForURL((url) => url.hostname === mainHost, {
+        timeout: 15_000,
+        waitUntil: 'domcontentloaded',
+      });
+      await dismissEventPopup(page);
+    }
+
+    // 비로그인 상태 확인 - 로그인 버튼 다시 노출 (로그아웃 리다이렉트 완료까지 재시도 대기)
     await expect(
-      page.locator('[data-gnb-kind="signupLogin"]'),
-    ).toBeVisible({ timeout: 10_000 });
+      page.locator('[data-gnb-kind="signupLogin"]').locator('visible=true').first(),
+    ).toBeVisible({ timeout: 15_000 });
   });
 });

@@ -35,6 +35,7 @@ export async function login(page: Page) {
   await page.waitForLoadState('domcontentloaded');
   await dismissEventPopup(page);
 
+  // 로그인 후 홈 복귀 + 헤더 렌더 — 배포 직후 콜드 스타트 시 10초를 넘길 수 있어 여유 있게
   const profileArea = page.getByRole('link', { name: 'MY 원티드' })
-  await expect(profileArea).toBeVisible({ timeout: 10_000 });
+  await expect(profileArea).toBeVisible({ timeout: 30_000 });
 }

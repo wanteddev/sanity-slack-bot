@@ -75,10 +75,42 @@ function outcomeLine(o: BrowserOutcome): string {
   return `${icon} *${name}* — 통과 ${r.passed} / 실패 ${r.failed}${skipped} (${r.duration})`;
 }
 
+/**
+ * 배포 직후 콜드 스타트 대비 워밍업.
+ * 대상 환경이 안정적으로(연속 3회, 각 3초 이내) 응답할 때까지 최대 2분 대기한다.
+ * 배포 완료 직후 첫 요청들이 느려 로그인 플로우가 타임아웃되는 것을 방지.
+ */
+async function warmUp(baseURL: string) {
+  const deadline = Date.now() + 120_000;
+  let stable = 0;
+  while (Date.now() < deadline) {
+    const t0 = Date.now();
+    try {
+      const res = await fetch(baseURL, { redirect: 'manual' });
+      const ms = Date.now() - t0;
+      if (res.status < 500 && ms < 3_000) {
+        stable++;
+        console.log(`[ci] 워밍업 ${stable}/3 — ${res.status} (${ms}ms)`);
+        if (stable >= 3) return;
+      } else {
+        stable = 0;
+        console.log(`[ci] 워밍업 대기 — ${res.status} (${ms}ms)`);
+      }
+    } catch (e) {
+      stable = 0;
+      console.log(`[ci] 워밍업 대기 — 접속 실패: ${String(e).slice(0, 80)}`);
+    }
+    await new Promise((r) => setTimeout(r, 5_000));
+  }
+  console.warn('[ci] 워밍업 시간(2분) 초과 — 그대로 진행합니다.');
+}
+
 async function main() {
   const envKey = process.env.SANITY_ENV || 'wwwtest';
   const baseURL = ENVIRONMENTS[envKey];
   if (!baseURL) throw new Error(`알 수 없는 환경: ${envKey}`);
+
+  await warmUp(baseURL);
 
   const browsers = parseBrowsers(
     process.env.SANITY_BROWSERS || 'chrome,safari,mobile-chrome,mobile-safari',

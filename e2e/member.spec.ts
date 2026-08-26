@@ -4,10 +4,14 @@ import { dismissEventPopup, isMobileViewport } from './helpers/dismiss-app-popup
 
 test.describe('회원', () => {
   test('이메일 로그인 정상 동작 확인', async ({ page }) => {
+    // 배포 직후 콜드 스타트 시 로그인 플로우가 30초를 넘길 수 있어 상향
+    test.setTimeout(60_000);
     await login(page);
   });
 
   test('로그아웃 정상 동작 확인', async ({ page }) => {
+    // 로그인 전체 플로우 + 크로스 도메인 이동 포함 — 배포 직후 콜드 스타트 대비 상향
+    test.setTimeout(60_000);
     await login(page);
     await page.waitForLoadState('domcontentloaded');
 
@@ -34,16 +38,24 @@ test.describe('회원', () => {
         'MY 원티드(소셜 서비스)가 인증 게이트로 차단된 환경 — 로그아웃 플로우 검증 불가',
       );
 
-      // 로그아웃 클릭 → 로그아웃 API 경유 리다이렉트가 메인으로 돌아올 때까지 대기
-      // (리다이렉트 완료 전에 페이지를 떠나면 로그아웃이 유실됨 — 특히 WebKit에서 재현)
-      await page.locator('[data-snb-kind="logout"]').click();
+      // 로그아웃 클릭 → 로그아웃 API 경유 리다이렉트가 메인으로 돌아올 때까지 대기.
+      // MY 페이지 하이드레이션 전 클릭이 무시될 수 있어(활성화만 되고 리다이렉트 없음),
+      // 메인으로 돌아올 때까지 클릭을 재시도한다.
       const mainHost = new URL(
         process.env.E2E_BASE_URL || 'https://dev.wanted.co.kr',
       ).hostname;
-      await page.waitForURL((url) => url.hostname === mainHost, {
-        timeout: 15_000,
-        waitUntil: 'domcontentloaded',
-      });
+      await expect(async () => {
+        if (new URL(page.url()).hostname !== mainHost) {
+          await page
+            .locator('[data-snb-kind="logout"]')
+            .click({ timeout: 2_500 })
+            .catch(() => {});
+        }
+        await page.waitForURL((url) => url.hostname === mainHost, {
+          timeout: 5_000,
+          waitUntil: 'domcontentloaded',
+        });
+      }).toPass({ timeout: 30_000, intervals: [1_000, 2_000] });
       await dismissEventPopup(page);
     }
 

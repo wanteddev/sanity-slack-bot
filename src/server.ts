@@ -1,5 +1,7 @@
+import crypto from 'crypto';
 import { App } from '@slack/bolt';
 import { postScenarioResults } from './slack-report';
+import { runDeploySanity, isDeploySanityRunning } from './deploy-sanity';
 import {
   SLACK_CONFIG,
   ENVIRONMENTS,
@@ -70,7 +72,8 @@ async function requestRun(
   respond: Respond,
   replaceOriginal: boolean,
 ) {
-  if (isTestRunning()) {
+  // 배포 새니티는 브라우저 사이에 per-run 락이 잠깐 풀리므로 deploy 게이트도 함께 확인
+  if (isTestRunning() || isDeploySanityRunning()) {
     if (queue.some((q) => q.userId === req.userId)) {
       await respond({
         response_type: 'ephemeral',
@@ -391,6 +394,123 @@ for (const actionId of ['rerun_same', 'rerun_failed'] as const) {
   });
 }
 
+
+// ─────────────────────────────────────────────
+// 배포 트리거 (GitHub Actions → Slack 메시지 → 봇)
+// ─────────────────────────────────────────────
+//
+// GitHub 러너는 CloudFront 지역/IP 차단으로 wwwtest에 직접 접근할 수 없어,
+// 배포 워크플로우가 이 채널에 트리거 메시지를 게시하면 사내망의 봇이 대신 실행한다.
+//
+// 메시지 형식: "sanity-deploy env=<환경> ts=<unix초> sig=<hmac>"
+//   sig = HMAC-SHA256("<환경>:<ts>", SANITY_TRIGGER_SECRET) hex
+//
+// 검증: (1) SANITY_TRIGGER_CHANNEL 채널 일치 (2) HMAC 서명 (3) 10분 이내 신선도
+//       (4) 동일 서명 재사용(replay) 차단. 워크플로우는 DEPLOY 봇 토큰으로 게시해야 한다
+//       — 이 앱의 토큰으로 게시하면 Bolt의 ignoreSelf가 이벤트를 걸러 트리거되지 않는다.
+//
+// 사전 조건: Slack 앱에 message.channels 이벤트 구독 + channels:history 스코프,
+//            트리거 채널에 이 봇과 DEPLOY 봇 모두 초대.
+
+const TRIGGER_PREFIX = 'sanity-deploy';
+const TRIGGER_MAX_AGE_MS = 10 * 60 * 1000;
+const seenTriggerSigs = new Set<string>();
+
+function verifyTriggerSig(env: string, ts: string, sig: string, secret: string): boolean {
+  const expected = crypto.createHmac('sha256', secret).update(`${env}:${ts}`).digest('hex');
+  const a = Buffer.from(expected);
+  const b = Buffer.from(sig);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+app.event('message', async ({ event, client }) => {
+  const msg = event as { channel?: string; text?: string; ts?: string; subtype?: string };
+  const text = (msg.text ?? '').trim();
+  if (!text.startsWith(TRIGGER_PREFIX)) return;
+
+  const reply = (replyText: string) =>
+    client.chat
+      .postMessage({ channel: msg.channel!, thread_ts: msg.ts, text: replyText })
+      .catch((e) => console.warn('[deploy-trigger] 응답 실패:', String(e).slice(0, 120)));
+
+  const secret = process.env.SANITY_TRIGGER_SECRET;
+  const triggerChannel = process.env.SANITY_TRIGGER_CHANNEL;
+  if (!secret || !triggerChannel) {
+    console.warn('[deploy-trigger] SANITY_TRIGGER_SECRET/CHANNEL 미설정 — 트리거 무시');
+    return;
+  }
+  if (msg.channel !== triggerChannel) {
+    console.warn(`[deploy-trigger] 허용되지 않은 채널(${msg.channel}) — 무시`);
+    return;
+  }
+
+  const params = new Map(
+    text
+      .slice(TRIGGER_PREFIX.length)
+      .trim()
+      .split(/\s+/)
+      .map((kv) => kv.split('=') as [string, string]),
+  );
+  const envKey = params.get('env') ?? '';
+  const ts = params.get('ts') ?? '';
+  const sig = params.get('sig') ?? '';
+
+  if (!ENVIRONMENTS[envKey] || !ts || !sig) {
+    await reply('⚠️ 트리거 형식이 올바르지 않습니다. (`sanity-deploy env=<환경> ts=<unix초> sig=<hmac>`)');
+    return;
+  }
+  if (Math.abs(Date.now() - Number(ts) * 1000) > TRIGGER_MAX_AGE_MS) {
+    await reply('⚠️ 트리거가 만료되었습니다 (10분 초과).');
+    return;
+  }
+  if (!verifyTriggerSig(envKey, ts, sig, secret)) {
+    console.warn('[deploy-trigger] 서명 불일치 — 무시');
+    await reply('⚠️ 트리거 서명이 올바르지 않습니다.');
+    return;
+  }
+  if (seenTriggerSigs.has(sig)) {
+    console.warn('[deploy-trigger] 재사용된 트리거 — 무시');
+    return;
+  }
+  seenTriggerSigs.add(sig);
+  if (seenTriggerSigs.size > 100) {
+    seenTriggerSigs.delete(seenTriggerSigs.values().next().value!);
+  }
+
+  if (isDeploySanityRunning()) {
+    await reply('🚫 이미 배포 새니티가 실행 중입니다 — 이 트리거는 무시합니다.');
+    return;
+  }
+
+  const browsers = (process.env.SANITY_BROWSERS || 'chrome,safari,mobile-chrome,mobile-safari')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((b): b is Browser => b in BROWSERS);
+
+  await reply(
+    `▶️ 배포 새니티를 시작합니다 — 환경: \`${envKey}\`, 브라우저: ${browsers.map((b) => BROWSERS[b]).join(' → ')}` +
+      (isTestRunning() ? '\n(수동 실행이 진행 중이라 종료 후 시작됩니다)' : ''),
+  );
+
+  void (async () => {
+    try {
+      await runDeploySanity({
+        envKey,
+        browsers,
+        scenarios: [],
+        slack: { client, channel: msg.channel! },
+        triggeredBy: 'GitHub Actions 배포',
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error('[deploy-trigger] 실행 오류:', message);
+      await reply(`❌ 배포 새니티 실행 오류: ${message.slice(0, 200)}`);
+    } finally {
+      // 배포 실행 동안 대기열에 쌓인 수동 요청 재개
+      drainQueue(client);
+    }
+  })();
+});
 
 (async () => {
   await app.start();

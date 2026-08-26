@@ -1,0 +1,15 @@
+node_modules
+dist
+.git
+docs
+
+# 시크릿/세션 — 이미지 레이어에 절대 포함 금지
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+credentials.json
+e2e/.auth
+e2e/test-results
+e2e/report.json

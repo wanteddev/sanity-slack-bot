@@ -12,4 +12,8 @@ COPY playwright.sanity.config.ts ./
 
 RUN npm run build
 
+# 루트 실행 회피 — Playwright 이미지가 제공하는 비루트 계정 사용
+RUN chown -R pwuser:pwuser /app
+USER pwuser
+
 CMD ["node", "dist/server.js"]

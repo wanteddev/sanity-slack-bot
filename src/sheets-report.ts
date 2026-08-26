@@ -2,7 +2,8 @@
  * 새니티 결과를 QA TC 스프레드시트에 기록.
  *
  * 흐름:
- * 1. "{배포일} WT" 이름의 탭을 찾고, 없으면 TC양식 탭을 복제해 생성 (같은 날 재배포는 기존 탭에 덮어씀)
+ * 1. 배포일 탭을 찾고("{배포일} WT" 정확 일치 우선, 없으면 배포일로 시작하는 수동 생성 탭 재사용),
+ *    그것도 없으면 TC양식 탭을 복제해 생성 (같은 날 재배포는 기존 탭에 덮어씀)
  * 2. 탭의 A~D열을 읽어 (대분류, 중분류, 항목) 텍스트로 TC 행 번호를 해석 (대분류 병합 셀은 forward-fill)
  * 3. 브라우저별 결과를 sheet-mapping 규칙으로 합산해 E~H열 드롭다운 값(PASS/FAIL/N/A)으로 일괄 기록
  *
@@ -87,11 +88,15 @@ function findCaseStatus(
 export async function reportToSheet(input: SheetReportInput): Promise<SheetReportSummary> {
   const key = parseServiceAccountKey(input.credentialsRaw);
   const client = new SheetsClient(key, input.spreadsheetId);
-  const tabName = `${input.date} WT`;
 
-  // 1. 배포일 탭 찾기 / 없으면 양식 복제
+  // 1. 배포일 탭 찾기 / 없으면 양식 복제.
+  // 자동 생성 이름("{배포일} WT")과 정확히 일치하는 탭이 우선이고, 없으면
+  // 수동으로 만든 "{배포일} WT 팀명" 같은 배포일로 시작하는 탭도 재사용한다.
   const tabs = await client.listTabs();
-  const existing = tabs.find((t) => t.title === tabName);
+  const existing =
+    tabs.find((t) => t.title === `${input.date} WT`) ??
+    tabs.find((t) => t.title.trim().startsWith(input.date));
+  const tabName = existing?.title ?? `${input.date} WT`;
   let created = false;
   if (!existing) {
     if (!tabs.some((t) => t.sheetId === input.templateGid)) {

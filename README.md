@@ -17,7 +17,7 @@ Playwright가 실제 브라우저 4종(데스크톱/모바일웹 × 크롬/사�
 ## 아키텍처
 
 ```
-👤 팀원 ──/sanity──▶ 💬 Slack ◀──Socket Mode──▶ 🤖 봇 서버 (AWS EC2)
+👤 팀원 ──/sanity──▶ 💬 Slack ◀──Socket Mode──▶ 🤖 봇 서버 (Backyard backend)
                                                      │ spawn
                                                      ▼
                                               🎭 Playwright ×4
@@ -122,12 +122,14 @@ userweb `release.yml`의 `sanity-test` 잡(deploy-end 이후)이 Slack 트리거
 
 ## 배포 (봇 서버)
 
-Wanted AWS **DEV 계정의 EC2 인스턴스**(t3.medium, Ubuntu 22.04)에서 Docker 컨테이너로 운영합니다. Playwright 고정 버전 이미지 기반 Dockerfile로 빌드하며, 인바운드 포트는 열지 않습니다(Socket Mode — 아웃바운드 443만 사용). 인프라 상세는 [EC2 인스턴스 요청 문서](https://wantedlab.atlassian.net/wiki/spaces/DEVOPS/pages/4939808806) 참고.
+사내 **Backyard backend 컴포넌트**로 운영합니다. Playwright 고정 버전 이미지 기반 Dockerfile로 빌드해 레지스트리에 `:latest`로 push하면 자동 롤아웃됩니다. 환경변수는 Backyard 시크릿으로 등록합니다 (`.env` 파일은 이미지에 포함되지 않음 — `.dockerignore` 참고).
 
 ```bash
-docker build -t sanity-slack-bot .
-docker run -d --name sanity-slack-bot --restart unless-stopped --env-file .env sanity-slack-bot
+docker build -t oci.wntd.co/backyard/sanity-slack-bot .
+docker push oci.wntd.co/backyard/sanity-slack-bot
 ```
+
+⚠️ **리소스 요건** — Playwright 실브라우저 구동에 **CPU 2코어 / 메모리 4Gi** 이상이 필요합니다. Backyard 기본값(CPU 100m/1Gi)에서는 브라우저 렌더링이 타임아웃되므로 리소스 상향이 적용된 상태여야 합니다 (1CPU/1Gi 재현 실험으로 확인).
 
 ⚠️ **단일 인스턴스 전제** — 컨테이너를 2개 이상 띄우면 동시 실행 방지(lock)와 대기열이 무력화됩니다. 로컬 개발 봇과 운영 봇을 동시에 켜는 것도 같은 이유로 피하세요 (Socket Mode 이중 연결 시 이벤트가 랜덤 배정됨).
 

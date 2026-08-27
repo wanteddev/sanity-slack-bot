@@ -12,12 +12,12 @@ Playwright가 실제 브라우저 4종(데스크톱/모바일웹 × 크롬/사�
 - **대기열** — 실행 중 새 요청은 큐(최대 5)에 등록, 차례가 되면 자동 실행 + DM 알림
 - **결과 리포트** — 채널에 요약, 스레드에 시나리오별 케이스 상세(✅/❌/⏭️ + 건너뜀 사유) + 실패 증거 자동 첨부
 - **재실행 버튼** — `▶️ 같은 조건으로 재실행` / `🔄 실패만 재실행` (실패한 시나리오만)
-- **배포 연동** — userweb wwwtest 배포 성공 시 GitHub Actions가 웹→모바일웹 순차 자동 실행
+- **배포 연동** — userweb wwwtest 배포 성공 시 GitHub Actions가 Slack으로 트리거를 보내고, 봇이 웹→모바일웹 순차 자동 실행
 
 ## 아키텍처
 
 ```
-👤 팀원 ──/sanity──▶ 💬 Slack ◀──Socket Mode──▶ 🤖 봇 서버 (Backyard backend)
+👤 팀원 ──/sanity──▶ 💬 Slack ◀──Socket Mode──▶ 🤖 봇 서버 (AWS EC2)
                                                      │ spawn
                                                      ▼
                                               🎭 Playwright ×4
@@ -25,28 +25,29 @@ Playwright가 실제 브라우저 4종(데스크톱/모바일웹 × 크롬/사�
                                                      ▼
                                         🌐 dev ~ wwwtest.wanted.co.kr
 
-🚀 userweb wwwtest 배포 ──▶ GitHub Actions (npm run ci) ──▶ 💬 Slack 결과 게시
+🚀 userweb wwwtest 배포 ──▶ GitHub Actions ──트리거(HMAC 서명)──▶ 💬 Slack ──▶ 🤖 봇이 실행·결과 게시
 ```
 
-- 봇은 **Socket Mode**로 동작해 외부 URL 노출이 없습니다.
-- CI 실행은 봇 서버와 독립적으로 GitHub Actions 러너에서 직접 돌아갑니다 (같은 Slack 앱 토큰을 쓰면 CI 결과 메시지의 재실행 버튼도 봇이 처리).
+- 봇은 **Socket Mode**로 동작해 외부 URL 노출이 없습니다 (인바운드 포트 0개).
+- 배포 후 자동 실행도 봇이 수행합니다 — GitHub 러너는 CloudFront 지역/IP 차단으로 wwwtest에 접근할 수 없어, 워크플로우는 서명된 트리거 메시지만 Slack에 게시합니다.
 - in-memory lock/대기열 특성상 **봇은 반드시 단일 인스턴스로 운영**해야 합니다.
 
 ## 프로젝트 구조
 
 ```
 ├── src/
-│   ├── server.ts          # Slack Bolt 서버 — 커맨드/버튼 핸들러, 실행 오케스트레이터, 대기열
-│   ├── ci.ts              # CI 진입점 — 브라우저 순차 실행 + Slack 리포트 (npm run ci)
+│   ├── server.ts          # Slack Bolt 서버 — 커맨드/버튼/배포 트리거 핸들러, 오케스트레이터, 대기열
+│   ├── deploy-sanity.ts   # 배포 새니티 공통 로직 — 워밍업 → 브라우저 순차 실행 → 리포트/시트 기록
+│   ├── ci.ts              # 직접 실행 진입점 (npm run ci) — 봇 없이 deploy-sanity 수행
 │   ├── test-runner.ts     # Playwright spawn, 진행률 파싱, 결과(JSON 리포트) 파싱, lock/취소
 │   ├── slack-ui.ts        # Block Kit 메시지 빌더 (선택 UI/진행/결과/대기열/사용법)
 │   ├── slack-report.ts    # 스레드 상세 + 실패 아티팩트(스크린샷/영상/trace) 업로드
+│   ├── sheets-report.ts   # QA TC 스프레드시트 기록 (+ sheets-client / sheet-mapping)
 │   └── config.ts          # 환경/시나리오/브라우저 정의, 커맨드 인자 파서, 타임아웃 정책
 ├── e2e/
 │   ├── member.spec.ts / profile.spec.ts / job-posting.spec.ts
 │   ├── education-event.spec.ts / social.spec.ts / resume.spec.ts
 │   └── helpers/           # 로그인, 세션 캐시(auth.setup), 팝업/스낵바 정리, 뷰포트 유틸
-├── ci/sanity-after-deploy.example.yml   # userweb release.yml에 붙이는 잡 템플릿
 ├── playwright.sanity.config.ts          # 브라우저 프로젝트 4종 + setup(세션 캐시)
 └── Dockerfile                           # Playwright 공식 이미지 기반 (비루트 실행)
 ```
@@ -78,6 +79,9 @@ npm run dev                              # 봇 서버 (tsx watch)
 | `SLACK_APP_TOKEN` | Socket Mode App Token (`xapp-`) | 봇 서버만 |
 | `SLACK_SIGNING_SECRET` | Slack App Signing Secret | 봇 서버만 |
 | `TEST_USER_EMAIL` / `TEST_USER_PASSWORD` | 테스트 계정 | ✅ |
+| `SANITY_TRIGGER_SECRET` | 배포 트리거 HMAC 검증 키 — userweb GitHub Secret과 동일 값 | 배포 연동 시 |
+| `SANITY_TRIGGER_CHANNEL` | 배포 트리거를 수신할 채널 ID | 배포 연동 시 |
+| `SANITY_GSHEET_CREDENTIALS` / `SANITY_SHEET_ID` | QA TC 스프레드시트 기록 (미설정 시 기록만 건너뜀) | 선택 |
 | `SLACK_FAILURE_MENTION` | 실패 시 결과에 함께 멘션할 대상 (예: `<!subteam^S...>`) | 선택 |
 
 ### 테스트만 로컬 실행
@@ -103,29 +107,26 @@ E2E_BASE_URL=https://dev.wanted.co.kr npx playwright test \
 - 결과의 **⏭️ 건너뜀은 실패가 아니라 환경/조건 문제**입니다 (시드 데이터 부재, 모바일 미제공 기능 등 — 사유가 함께 표기됨)
 - 실패 스레드의 **trace.zip**을 [trace.playwright.dev](https://trace.playwright.dev)에 드래그하면 클릭·네트워크 타임라인을 재생할 수 있습니다
 
-## CI 연동 (배포 후 자동 실행)
+## 배포 연동 (wwwtest 배포 후 자동 실행)
 
-userweb `release.yml`의 `deploy-end` 이후 잡이 이 저장소를 checkout해 `npm run ci`를 실행합니다. 템플릿은 [`ci/sanity-after-deploy.example.yml`](ci/sanity-after-deploy.example.yml) 참고.
+userweb `release.yml`의 `sanity-test` 잡(deploy-end 이후)이 Slack 트리거 채널에 `sanity-deploy env=wwwtest ts=<unix초> sig=<hmac>` 메시지를 게시하면, 봇이 서명·유효시간(10분)·채널을 검증한 뒤 웹→모바일웹 순차로 실행하고 결과를 같은 채널에 게시합니다.
 
-```bash
-# CI 진입점이 읽는 환경변수
-SANITY_ENV=wwwtest                                  # 대상 환경 (기본 wwwtest)
-SANITY_BROWSERS=chrome,safari,mobile-chrome,mobile-safari  # 순차 실행
-SANITY_SCENARIOS=이력서,회원                          # 선택 (미지정 시 전체)
-SLACK_REPORT_CHANNEL=C0XXXXXXX                      # 결과 게시 채널 ID
-SANITY_DRY_RUN=1                                    # Slack 게시 없이 실행 (검증용)
-```
-
+- 러너에서 직접 실행하지 않는 이유: GitHub 러너(해외 IP)는 CloudFront 차단으로 wwwtest 접근 불가
+- 트리거는 **DEPLOY 봇 토큰**으로 게시해야 합니다 — 새니티 봇은 자기 메시지를 무시(ignoreSelf)
+- 두 봇(DEPLOY·새니티) 모두 트리거 채널에 초대돼 있어야 합니다
+- userweb 쪽 필요 Secret: `DEPLOY_SLACK_BOT_TOKEN`, `SANITY_SLACK_CHANNEL`, `SANITY_TRIGGER_SECRET`(봇의 `SANITY_TRIGGER_SECRET`과 동일 값)
 - 브라우저는 **순차 실행**합니다 — 동일 테스트 계정의 상태(기본 이력서 등)를 공유하므로 병렬 금지
-- 실패가 있으면 exit 1 (deploy-end 이후 잡이라 배포에는 영향 없음)
+- 배포 새니티 실행 중 수동 `/sanity` 요청은 대기열로, 중복 트리거는 무시됩니다
+
+봇을 거치지 않고 직접 실행해야 할 때(로컬 검증 등)는 `npm run ci`를 쓸 수 있습니다 (`SANITY_ENV`/`SANITY_BROWSERS`/`SLACK_REPORT_CHANNEL`/`SANITY_DRY_RUN=1` 등은 [`src/ci.ts`](src/ci.ts) 주석 참고).
 
 ## 배포 (봇 서버)
 
-Playwright 고정 버전 이미지 기반 Dockerfile로 빌드해 Backyard backend 컴포넌트로 운영합니다.
+Wanted AWS **DEV 계정의 EC2 인스턴스**(t3.medium, Ubuntu 22.04)에서 Docker 컨테이너로 운영합니다. Playwright 고정 버전 이미지 기반 Dockerfile로 빌드하며, 인바운드 포트는 열지 않습니다(Socket Mode — 아웃바운드 443만 사용). 인프라 상세는 [EC2 인스턴스 요청 문서](https://wantedlab.atlassian.net/wiki/spaces/DEVOPS/pages/4939808806) 참고.
 
 ```bash
 docker build -t sanity-slack-bot .
-docker run -d --env-file .env sanity-slack-bot
+docker run -d --name sanity-slack-bot --restart unless-stopped --env-file .env sanity-slack-bot
 ```
 
 ⚠️ **단일 인스턴스 전제** — 컨테이너를 2개 이상 띄우면 동시 실행 방지(lock)와 대기열이 무력화됩니다. 로컬 개발 봇과 운영 봇을 동시에 켜는 것도 같은 이유로 피하세요 (Socket Mode 이중 연결 시 이벤트가 랜덤 배정됨).
@@ -143,11 +144,4 @@ docker run -d --env-file .env sanity-slack-bot
 - 테스트가 데이터를 생성하면 **반드시 정리** (API DELETE) — 잔여물이 다음 실행을 깨뜨립니다
 - 시드 데이터 의존 테스트는 `getSeedResume` 패턴으로 — 시드가 없으면 실패 대신 사유와 함께 skip
 
-### 시드 데이터
 
-이력서 시나리오 일부는 테스트 계정에 이름 붙은 시드 이력서("작성 중 이탈 케이스", "경력사항 변경" 등 6종 + "기본 이력서")가 미리 있어야 합니다. 없으면 해당 테스트는 사유와 함께 건너뜁니다.
-
-## 알려진 제약
-
-- 모바일웹에서 채용공고 필터 조작은 UI가 달라 **모바일 전용 케이스**로 분리되어 있습니다 (데스크톱 케이스는 모바일에서 skip, 반대도 동일)
-- dev 환경의 소셜 서비스가 인증 게이트로 차단된 시기에는 소셜/프로필/로그아웃이 사유와 함께 skip됩니다 (게이트 감지 기반이라 자동 복귀)

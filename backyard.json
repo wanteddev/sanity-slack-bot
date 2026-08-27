@@ -1,6 +1,0 @@
-{
-  "name": "sanity-slack-bot",
-  "framework": "node",
-  "registry": "oci.wntd.co/backyard/sanity-slack-bot",
-  "createdAt": "2026-04-07T00:00:00.000Z"
-}

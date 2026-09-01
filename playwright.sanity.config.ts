@@ -16,7 +16,9 @@ export default defineConfig({
     baseURL: process.env.E2E_BASE_URL || 'https://dev.wanted.co.kr',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    // 재시도 시에만 녹화 — 정상 케이스의 상시 ffmpeg 인코딩 비용 제거.
+    // retries: 1이라 최종 실패는 반드시 재시도를 거치므로 실패 영상은 보존됨.
+    video: 'on-first-retry',
     headless: true,
     navigationTimeout: 15_000,
     actionTimeout: 10_000,

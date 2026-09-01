@@ -1,4 +1,5 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect } from './helpers/fixtures';
+import type { Page } from '@playwright/test';
 import { dismissEventPopup } from './helpers/dismiss-app-popup';
 
 // 같은 테스트 계정의 프로필 상태(직군/직무, 한 줄 소개)를 변경하는 시나리오이므로

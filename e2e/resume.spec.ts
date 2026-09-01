@@ -1,5 +1,6 @@
 import fs from 'fs';
-import { test, expect, Page, Locator } from '@playwright/test';
+import { test, expect } from './helpers/fixtures';
+import type { Page, Locator } from '@playwright/test';
 import { dismissEventPopup, isMobileViewport } from './helpers/dismiss-app-popup';
 
 // 같은 테스트 계정의 이력서 상태(기본 이력서, 임시저장 등)를 변경하는 시나리오이므로

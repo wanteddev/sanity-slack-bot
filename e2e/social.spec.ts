@@ -1,4 +1,5 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect } from './helpers/fixtures';
+import type { Page } from '@playwright/test';
 import { dismissEventPopup } from './helpers/dismiss-app-popup';
 
 function getSocialBaseURL(): string {

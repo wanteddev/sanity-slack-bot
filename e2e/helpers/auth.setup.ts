@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { test as setup } from '@playwright/test';
+import { test as setup, blockTrackers } from './fixtures';
 import { login } from './login';
 import { getAuthFile, getBaseURL } from './auth-file';
 
@@ -13,6 +13,8 @@ setup('로그인 세션 저장', async ({ page, browser }) => {
       storageState: authFile,
       baseURL: getBaseURL(),
     });
+    // 수동 생성 컨텍스트라 fixture가 안 타므로 직접 차단 적용
+    await blockTrackers(context);
     const probe = await context.newPage();
     try {
       await probe.goto('/', { waitUntil: 'domcontentloaded' });

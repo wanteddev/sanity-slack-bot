@@ -4,9 +4,26 @@ import type { WebClient } from '@slack/web-api';
 import { buildScenarioThreadMessage } from './slack-ui';
 import type { TestResult } from './test-runner';
 
+// 동시 업로드 개수 — trace가 개당 15~20MB라 직렬 업로드는 실패가 많을 때 몇 분씩 걸린다.
+// Slack rate limit을 피하면서 대역폭을 채우는 절충값.
+const UPLOAD_CONCURRENCY = 3;
+
+/** 태스크 목록을 등록 순서대로 시작하되 동시에 limit개까지만 실행 */
+async function runWithConcurrency(tasks: (() => Promise<void>)[], limit: number) {
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
+    while (next < tasks.length) {
+      const i = next++;
+      await tasks[i]();
+    }
+  });
+  await Promise.all(workers);
+}
+
 /**
  * 시나리오별 상세 결과를 스레드 댓글로 게시하고,
  * 각 시나리오의 실패 아티팩트(스크린샷 → 영상 → trace)를 댓글 뒤에 이어 업로드한다.
+ * 시나리오 간에는 직렬(그룹핑 유지), 시나리오 안의 파일 업로드는 병렬.
  * 봇 서버(Slack 액션)와 CI 스크립트가 공용으로 사용.
  */
 export async function postScenarioResults(
@@ -37,14 +54,16 @@ export async function postScenarioResults(
       console.error(`[thread-post] ${scenario.name} 댓글 게시 실패:`, e);
     }
 
-    // 해당 시나리오의 실패 아티팩트를 댓글 바로 뒤에 이어서 업로드 (시나리오별 그룹핑)
+    // 해당 시나리오의 실패 아티팩트를 댓글 뒤에 업로드 (병렬이라 완료 순서는 섞일 수 있음)
+    const uploadTasks: (() => Promise<void>)[] = [];
+
     for (const failure of scenario.failures) {
       const safeName = `${scenario.name}-${failure.title}`
         .replace(/[^a-zA-Z0-9가-힣_-]/g, '_')
         .slice(0, 80);
       const comment = `❌ *${scenario.name}* > ${failure.title}`;
 
-      // 스크린샷 우선(가볍고 스레드에서 즉시 미리보기됨), 영상·trace는 보조로 뒤이어 업로드
+      // 스크린샷 우선(가볍고 스레드에서 즉시 미리보기됨), 영상·trace는 보조
       const uploads: { path?: string; label: string; comment?: string }[] = [
         { path: failure.screenshotPath, label: 'screenshot', comment },
         {
@@ -69,24 +88,28 @@ export async function postScenarioResults(
           continue;
         }
 
-        const ext = path.extname(filePath) || '';
-        const buffer = fs.readFileSync(filePath);
-        console.log(
-          `[artifact-upload] uploading ${label} ${safeName}${ext} (${buffer.length} bytes)`,
-        );
+        uploadTasks.push(async () => {
+          const ext = path.extname(filePath) || '';
+          const buffer = fs.readFileSync(filePath);
+          console.log(
+            `[artifact-upload] uploading ${label} ${safeName}${ext} (${buffer.length} bytes)`,
+          );
 
-        try {
-          await client.files.uploadV2({
-            channel_id: channelId,
-            thread_ts: threadTs,
-            ...(initialComment ? { initial_comment: initialComment } : {}),
-            file: buffer,
-            filename: `${safeName}${ext}`,
-          });
-        } catch (e) {
-          console.error(`[artifact-upload] ${label} 업로드 실패:`, e);
-        }
+          try {
+            await client.files.uploadV2({
+              channel_id: channelId,
+              thread_ts: threadTs,
+              ...(initialComment ? { initial_comment: initialComment } : {}),
+              file: buffer,
+              filename: `${safeName}${ext}`,
+            });
+          } catch (e) {
+            console.error(`[artifact-upload] ${label} 업로드 실패:`, e);
+          }
+        });
       }
     }
+
+    await runWithConcurrency(uploadTasks, UPLOAD_CONCURRENCY);
   }
 }

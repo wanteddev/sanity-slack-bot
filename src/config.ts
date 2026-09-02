@@ -22,33 +22,6 @@ export const SCENARIOS: Record<string, { name: string; file: string }> = {
   resume: { name: "이력서", file: "resume.spec.ts" },
 };
 
-/**
- * 배포 새니티(CI/CD 트리거)에서 제외할 시나리오와 사유.
- * 수동 /sanity 실행에는 적용되지 않는다.
- *
- * - education-event: event-wwwtest.wanted.co.kr이 사내망 전용 사설 IP(10.10.x.x)로만
- *   해석돼 Backyard 파드에서 접근 불가 → GNB 클릭 후 waitForURL이 항상 타임아웃.
- *   인프라에서 공인 노출(event-dev처럼 CloudFront)되면 제거할 것.
- */
-export const DEPLOY_SANITY_EXCLUDED: Record<string, string> = {
-  'education-event': 'event-wwwtest가 사내망 전용이라 Backyard에서 접근 불가',
-};
-
-/**
- * 배포 새니티가 실제로 실행할 시나리오 목록.
- * 미지정(빈 배열)이면 전체에서 DEPLOY_SANITY_EXCLUDED를 뺀 목록을 쓰고,
- * 명시적으로 지정한 경우(SANITY_SCENARIOS)는 제외 없이 그대로 존중한다.
- */
-export function resolveDeployScenarios(explicit: string[]): {
-  scenarios: string[];
-  excluded: string[];
-} {
-  if (explicit.length > 0) return { scenarios: explicit, excluded: [] };
-  const excluded = Object.keys(SCENARIOS).filter((k) => k in DEPLOY_SANITY_EXCLUDED);
-  const scenarios = Object.keys(SCENARIOS).filter((k) => !(k in DEPLOY_SANITY_EXCLUDED));
-  return { scenarios, excluded };
-}
-
 // 실행 타임아웃: 기본 3분 + 시나리오당 3분, 상한 20분 (retries: 1로 인한 재시도 시간 포함)
 const BASE_TIMEOUT_MS = 3 * 60 * 1000;
 const PER_SCENARIO_TIMEOUT_MS = 3 * 60 * 1000;

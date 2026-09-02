@@ -8,8 +8,12 @@ export default defineConfig({
   fullyParallel: true,
   // flaky 보완: 재시도 후 통과하면 러너가 통과로 집계함 (trace는 재시도 시에만 기록)
   retries: 1,
-  workers: 3,
-  timeout: 30_000,
+  // 봇 서버 파드가 4 vCPU / 4GiB 고정. WebKit은 워커당 웹프로세스만 ~1GB·1코어 이상을 쓰므로
+  // 워커 3개면 메모리가 한도(4GiB)에 닿아 페이지가 멈추고 타임아웃 실패가 난다(cgroup memory.events max 다수).
+  // 속도보다 안정성을 우선해 2개로 고정. 필요 시 SANITY_WORKERS로 조정.
+  workers: Number(process.env.SANITY_WORKERS) || 2,
+  // 자원 경합 구간의 느린 페이지 로드를 흡수 (30s는 waitForURL 상한과 같아 진짜 원인이 가려졌음)
+  timeout: 45_000,
   reporter: [['json', { outputFile: undefined }]],
 
   use: {

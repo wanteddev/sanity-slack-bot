@@ -11,7 +11,15 @@
  * 수동 실행 요청을 대기열로 보낸다.
  */
 import type { WebClient } from '@slack/web-api';
-import { ENVIRONMENTS, BROWSERS, SLACK_CONFIG, type Browser } from './config';
+import {
+  ENVIRONMENTS,
+  BROWSERS,
+  SCENARIOS,
+  SLACK_CONFIG,
+  DEPLOY_SANITY_EXCLUDED,
+  resolveDeployScenarios,
+  type Browser,
+} from './config';
 import { runTests, isTestRunning, type TestResult } from './test-runner';
 import { buildResultMessage } from './slack-ui';
 import { postScenarioResults } from './slack-report';
@@ -100,6 +108,14 @@ export async function runDeploySanity(opts: DeploySanityOptions): Promise<Deploy
   const baseURL = ENVIRONMENTS[opts.envKey];
   if (!baseURL) throw new Error(`알 수 없는 환경: ${opts.envKey}`);
   const { slack } = opts;
+  // 배포 새니티 전용 제외 시나리오 적용 (명시 지정 시에는 그대로 존중)
+  const { scenarios, excluded } = resolveDeployScenarios(opts.scenarios);
+  const excludedLines = excluded.map(
+    (k) => `• 제외: ${SCENARIOS[k].name} — ${DEPLOY_SANITY_EXCLUDED[k]}`,
+  );
+  if (excluded.length > 0) {
+    console.log(`[deploy-sanity] 제외 시나리오: ${excluded.join(', ')}`);
+  }
 
   deployRunning = true;
   try {
@@ -110,6 +126,7 @@ export async function runDeploySanity(opts: DeploySanityOptions): Promise<Deploy
         `${status} *배포 후 새니티 테스트* — 환경: \`${opts.envKey}\` (${baseURL})` +
           (opts.triggeredBy ? ` · ${opts.triggeredBy}` : ''),
         `• 브라우저: ${opts.browsers.map((b) => BROWSERS[b]).join(' → ')} (순차)`,
+        ...excludedLines,
         ...lines,
       ].join('\n');
 
@@ -132,7 +149,7 @@ export async function runDeploySanity(opts: DeploySanityOptions): Promise<Deploy
       await waitForRunnerIdle();
       console.log(`[deploy-sanity] ${browser} 실행 시작 (${opts.envKey})`);
       try {
-        const result = await runTests(baseURL, opts.scenarios, {
+        const result = await runTests(baseURL, scenarios, {
           userId: '',
           env: opts.envKey,
           browser,
@@ -143,7 +160,7 @@ export async function runDeploySanity(opts: DeploySanityOptions): Promise<Deploy
         );
 
         const blocks = buildResultMessage(opts.envKey, result, {
-          scenarios: opts.scenarios,
+          scenarios,
           browser,
         });
         if (slack && headerTs) {

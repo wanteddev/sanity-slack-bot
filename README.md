@@ -117,6 +117,7 @@ userweb `release.yml`의 `sanity-test` 잡(deploy-end 이후)이 Slack 트리거
 - userweb 쪽 필요 Secret: `DEPLOY_SLACK_BOT_TOKEN`, `SANITY_SLACK_CHANNEL`, `SANITY_TRIGGER_SECRET`(봇의 `SANITY_TRIGGER_SECRET`과 동일 값)
 - 브라우저는 **순차 실행**합니다 — 동일 테스트 계정의 상태(기본 이력서 등)를 공유하므로 병렬 금지
 - 배포 새니티 실행 중 수동 `/sanity` 요청은 대기열로, 중복 트리거는 무시됩니다
+- **교육·이벤트 시나리오는 배포 새니티에서 제외**됩니다 — `event-wwwtest.wanted.co.kr`이 사내망 전용 사설 IP로만 해석돼 Backyard 파드에서 접근 불가(항상 타임아웃). 헤더에 `• 제외:` 줄로 표기되며, 수동 `/sanity`에는 적용되지 않습니다. 인프라에서 공인 노출되면 [`src/config.ts`](src/config.ts)의 `DEPLOY_SANITY_EXCLUDED`에서 제거하세요 (`SANITY_SCENARIOS`로 명시 지정하면 제외 없이 실행)
 
 봇을 거치지 않고 직접 실행해야 할 때(로컬 검증 등)는 `npm run ci`를 쓸 수 있습니다 (`SANITY_ENV`/`SANITY_BROWSERS`/`SLACK_REPORT_CHANNEL`/`SANITY_DRY_RUN=1` 등은 [`src/ci.ts`](src/ci.ts) 주석 참고).
 

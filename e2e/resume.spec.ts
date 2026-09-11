@@ -164,14 +164,18 @@ async function openBasicResume(page: Page) {
  * 이력서 리스트 진입 시 자동 노출되는 온보딩 모달("희망 근무지 설정" 등)을 닫는다.
  * 딤([data-role="modal-dimmer"])이 화면 전체의 pointer event를 가로채므로 닫지 않으면
  * 이후 모든 클릭이 인터셉트되어 리스트/상세 시나리오가 통째로 타임아웃 실패한다.
- * 한 번 닫으면 같은 컨텍스트에서는 재노출되지 않지만 테스트마다 컨텍스트가 새로 생기므로,
- * 리스트 진입 경로마다 호출한다. (상세 URL 직행이나 홈/프로필에서는 뜨지 않는다)
+ * 데스크톱은 중앙 카드형 모달, 모바일은 화면 전체를 덮는 풀스크린 시트로 렌더되지만
+ * 양쪽 모두 딤과 role=dialog를 갖고 '나중에 하기'를 포함한다.
+ *
+ * 테스트마다 컨텍스트가 새로 생겨 첫 진입에 뜨고, 이력서를 저장한 뒤 리스트로 되돌아올 때
+ * 다시 뜨기도 한다(봇 실행에서 관측). 그래서 리스트에 도달하는 모든 경로에서 호출한다.
+ * 상세 URL 직행이나 홈/프로필에서는 뜨지 않는다.
  */
-async function dismissResumeOnboardingModal(page: Page) {
+async function dismissResumeOnboardingModal(page: Page, timeout = 5_000) {
   const dimmer = page.locator('[data-role="modal-dimmer"]').first();
   try {
     // 하이드레이션 후 ~1.5초(로컬 실측)에 노출 — 저사양 CI 파드를 감안해 여유를 둔다
-    await dimmer.waitFor({ state: 'visible', timeout: 5_000 });
+    await dimmer.waitFor({ state: 'visible', timeout });
   } catch {
     return; // 모달이 노출되지 않는 경우 무시
   }
@@ -211,6 +215,21 @@ async function gotoResumeListViaGnb(page: Page) {
   await page.waitForLoadState('domcontentloaded');
   await page.waitForURL('**/cv/list', { timeout: 10_000, waitUntil: 'domcontentloaded' });
   await dismissResumeOnboardingModal(page);
+}
+
+/**
+ * 상세에서 뒤로가기로 리스트에 되돌아와 최신 상태를 반영한다.
+ * 이력서를 저장한 뒤 되돌아오면 온보딩이 다시 뜰 수 있어 여기서도 닫는다 —
+ * 닫지 않으면 딤이 카드 클릭을 가로채 테스트가 타임아웃으로 실패한다.
+ */
+async function goBackToResumeList(page: Page) {
+  await page.goBack();
+  await page.waitForURL('**/cv/list', { timeout: 10_000, waitUntil: 'domcontentloaded' });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('domcontentloaded');
+  // 첫 진입(5s)보다 짧게 — 이미 한 번 닫은 뒤라 재노출되지 않는 경우가 많고,
+  // 노출될 때는 하이드레이션 직후(~1.5초)에 뜬다
+  await dismissResumeOnboardingModal(page, 3_000);
 }
 
 test.describe('이력서', () => {
@@ -293,10 +312,7 @@ test.describe('이력서', () => {
 
       await setAsBasicResume(page);
 
-      await page.goBack();
-      await page.reload({ waitUntil: 'domcontentloaded' }); 
-      await page.waitForLoadState('domcontentloaded');
-      await page.waitForURL('**/cv/list', { timeout: 10_000, waitUntil: 'domcontentloaded' });
+      await goBackToResumeList(page);
 
       // "기본 이력서 변경 동작 확인" 카드에 isBasic 클래스가 반영됐는지 확인
       await expect(targetResume).toHaveClass(/isBasic/, { timeout: 10_000 });
@@ -355,10 +371,7 @@ test.describe('이력서', () => {
       await waitForResumeApi(page, () => titleTextarea.blur());
 
       // 뒤로가기로 /cv/list 진입 후 reload로 최신 상태 반영
-      await page.goBack();
-      await page.waitForURL('**/cv/list', { timeout: 10_000, waitUntil: 'domcontentloaded' });
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForLoadState('domcontentloaded');
+      await goBackToResumeList(page);
 
       // 카드 컨테이너에 이력서 id가 포함되어 유일하게 특정 가능
       const targetResume = page.locator(`[id="resume-${resumeId}-dropdown-container"]`);
@@ -440,10 +453,7 @@ test.describe('이력서', () => {
       await waitForResumeApi(page, () => emailInput.blur());
 
       // 뒤로가기 → /cv/list 진입 후 reload로 최신 상태 반영
-      await page.goBack();
-      await page.waitForURL('**/cv/list', { timeout: 10_000, waitUntil: 'domcontentloaded' });
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForLoadState('domcontentloaded');
+      await goBackToResumeList(page);
 
       // 다시 해당 이력서 edit 화면 진입
       await expect(targetResume).toBeVisible({ timeout: 10_000 });

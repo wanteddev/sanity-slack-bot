@@ -46,9 +46,14 @@ async function openCvSection(page: Page, name: string, focus: string) {
   const editButton = heading.locator('..').getByRole('button', { name: '편집' });
   const target = (await editButton.count()) ? editButton.first() : heading;
 
-  // SPA 하이드레이션 완료 전 클릭은 무시될 수 있어, 이동할 때까지 클릭을 재시도
+  // SPA 하이드레이션 완료 전 클릭은 무시될 수 있어, 이동할 때까지 클릭을 재시도.
+  // 단 이동이 시작된 뒤에는 재클릭하지 않는다 — 프로필에 없는 요소를 클릭하려다
+  // actionTimeout(10s)을 소진해 루프 예산이 먼저 바닥나기 때문.
+  // (WebKit은 하이드레이션이 느려 클릭이 3회까지 무시되는 것을 실측)
   await expect(async () => {
-    await target.click();
+    if (!page.url().includes('/cv/')) {
+      await target.click();
+    }
     // 이력서 편집 화면으로 focus 파라미터와 함께 이동하는지 확인
     await page.waitForURL(
       (url) =>

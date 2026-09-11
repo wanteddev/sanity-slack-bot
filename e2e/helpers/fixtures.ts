@@ -46,10 +46,37 @@ export async function blockTrackers(context: BrowserContext) {
   await context.route(isTrackerUrl, (route) => route.abort());
 }
 
-/** 트래커 차단이 기본 적용된 test — 스펙 파일은 @playwright/test 대신 이걸 import */
+/**
+ * 사내 버그 리포트 위젯(#__bugted)이 클릭을 가로채지 못하게 한다.
+ *
+ * 테스트 환경(wwwtest/dev)에만 주입되는 요소로 운영(www)에는 존재하지 않는다.
+ * body 마지막의 빈 div로 보이지만 위젯 본체가 비동기로 붙는 과정에서 화면 우하단을
+ * 덮어, 모바일 하단 GNB의 'MY 원티드'처럼 그 자리에 있는 클릭 타깃을 가로챈다
+ * (Playwright: `<div id="__bugted"></div> intercepts pointer events`).
+ *
+ * 숨기지 않고 pointer-events만 차단해, 레이아웃에 영향 없이 클릭이 아래 요소로 통과하게 한다.
+ * head는 프레임워크가 관리하며 주입한 style이 제거될 수 있어 documentElement에 붙인다.
+ */
+export async function disableBugReportWidget(context: BrowserContext) {
+  await context.addInitScript(`(() => {
+    var inject = function () {
+      var style = document.createElement('style');
+      style.textContent = '#__bugted, #__bugted * { pointer-events: none !important; }';
+      document.documentElement.appendChild(style);
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', inject);
+    } else {
+      inject();
+    }
+  })()`);
+}
+
+/** 트래커 차단 + 버그 위젯 무력화가 기본 적용된 test — 스펙 파일은 @playwright/test 대신 이걸 import */
 export const test = base.extend({
   context: async ({ context }, use) => {
     await blockTrackers(context);
+    await disableBugReportWidget(context);
     await use(context);
   },
 });

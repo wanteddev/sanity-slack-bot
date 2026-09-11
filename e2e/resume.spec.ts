@@ -160,11 +160,38 @@ async function openBasicResume(page: Page) {
   );
 }
 
+/**
+ * 이력서 리스트 진입 시 자동 노출되는 온보딩 모달("희망 근무지 설정" 등)을 닫는다.
+ * 딤([data-role="modal-dimmer"])이 화면 전체의 pointer event를 가로채므로 닫지 않으면
+ * 이후 모든 클릭이 인터셉트되어 리스트/상세 시나리오가 통째로 타임아웃 실패한다.
+ * 한 번 닫으면 같은 컨텍스트에서는 재노출되지 않지만 테스트마다 컨텍스트가 새로 생기므로,
+ * 리스트 진입 경로마다 호출한다. (상세 URL 직행이나 홈/프로필에서는 뜨지 않는다)
+ */
+async function dismissResumeOnboardingModal(page: Page) {
+  const dimmer = page.locator('[data-role="modal-dimmer"]').first();
+  try {
+    // 하이드레이션 후 ~1.5초(로컬 실측)에 노출 — 저사양 CI 파드를 감안해 여유를 둔다
+    await dimmer.waitFor({ state: 'visible', timeout: 5_000 });
+  } catch {
+    return; // 모달이 노출되지 않는 경우 무시
+  }
+
+  const dialog = page.getByRole('dialog').first();
+  // '나중에 하기'는 계정 설정을 바꾸지 않고 닫는다. 없으면 우측 상단 닫기(X)로 폴백.
+  const later = dialog.getByRole('button', { name: '나중에 하기' });
+  const closeTrigger = (await later.count())
+    ? later.first()
+    : dialog.getByRole('button', { name: 'Close dialog' }).first();
+  await closeTrigger.click({ timeout: 5_000 });
+  await dimmer.waitFor({ state: 'hidden', timeout: 5_000 });
+}
+
 /** 이력서 리스트 직행 — GNB 진입 검증은 '이력서 리스트 노출 확인' 테스트에서만 수행 */
 async function gotoResumeList(page: Page) {
   await page.goto('/cv/list', { waitUntil: 'domcontentloaded' });
   await dismissEventPopup(page);
   await page.waitForURL('**/cv/list', { timeout: 10_000, waitUntil: 'domcontentloaded' });
+  await dismissResumeOnboardingModal(page);
 }
 
 /** GNB 클릭 경유로 이력서 리스트 진입 (GNB 노출/동작 검증 겸용) */
@@ -183,6 +210,7 @@ async function gotoResumeListViaGnb(page: Page) {
     .click();
   await page.waitForLoadState('domcontentloaded');
   await page.waitForURL('**/cv/list', { timeout: 10_000, waitUntil: 'domcontentloaded' });
+  await dismissResumeOnboardingModal(page);
 }
 
 test.describe('이력서', () => {
